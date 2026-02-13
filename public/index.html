@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mission Control MVP</title>
+    <style>
+      body{font-family:Inter,system-ui,Arial;margin:0;background:#0b1020;color:#e9eefc}
+      .wrap{padding:14px;max-width:1200px;margin:0 auto}
+      .card{background:#131a33;border:1px solid #283056;border-radius:12px;padding:12px;margin-bottom:12px}
+      h1,h3{margin:0 0 8px}
+      small{color:#9fb2ff}
+      .grid{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+      .columns{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;overflow:auto}
+      .col{min-width:220px;background:#101733;border-radius:10px;padding:8px;min-height:220px}
+      .task,.msg{background:#1a2347;border:1px solid #2c3769;border-radius:8px;padding:8px;margin-bottom:8px}
+      .agents li{margin:6px 0;padding:8px;border-radius:8px;background:#0f1530;list-style:none}
+      input,select,textarea,button{width:100%;margin-top:6px;padding:9px;border-radius:8px;border:1px solid #334073;background:#0f1530;color:#fff;box-sizing:border-box}
+      button{background:#2856ff;border:none}
+      .tabs{display:flex;gap:8px;position:sticky;top:0;background:#0b1020;padding:6px 0;z-index:10}
+      .tab{padding:8px 12px;border-radius:999px;border:1px solid #334073;background:#0f1530;color:#fff;cursor:pointer}
+      .tab.active{background:#2856ff;border-color:#2856ff}
+      .hidden{display:none}
+      .chat-wrap{max-height:45vh;overflow:auto}
+      @media (max-width: 860px){
+        .grid{grid-template-columns:1fr}
+        .columns{grid-template-columns:repeat(4,minmax(230px,1fr))}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>🛰️ Mission Control MVP</h1>
+      <small>Agents + task board + war room chat.</small>
+
+      <div class="tabs">
+        <button class="tab active" onclick="setTab('board', this)">Board</button>
+        <button class="tab" onclick="setTab('war', this)">War Room</button>
+      </div>
+
+      <section id="board">
+        <div class="grid">
+          <div class="card">
+            <h3>Create Task</h3>
+            <input id="title" placeholder="Build user auth flow" />
+            <select id="agentId"></select>
+            <textarea id="details" rows="4" placeholder="Constraints, deliverables..."></textarea>
+            <button onclick="createTask()">Create Task</button>
+          </div>
+
+          <div class="card">
+            <h3>Agents</h3>
+            <ul id="agents" class="agents" style="padding-left:0"></ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Mission Queue</h3>
+          <div class="columns">
+            <div class="col"><strong>Queued</strong><div id="queued"></div></div>
+            <div class="col"><strong>In Progress</strong><div id="in_progress"></div></div>
+            <div class="col"><strong>Done</strong><div id="done"></div></div>
+            <div class="col"><strong>Failed</strong><div id="failed"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="war" class="hidden">
+        <div class="card">
+          <h3>Agent War Room</h3>
+          <small>Use @codex / @research / @main mentions.</small>
+          <div class="chat-wrap" id="messages" style="margin-top:10px"></div>
+          <textarea id="warText" rows="3" placeholder="@research review this plan, @codex suggest implementation"></textarea>
+          <button onclick="sendWarMessage()">Send to War Room</button>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      let state = { agents: [], tasks: [], sessionsByAgent: {}, warRoom: { messages: [] } };
+
+      function setTab(tab, el){
+        document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('board').classList.toggle('hidden', tab !== 'board');
+        document.getElementById('war').classList.toggle('hidden', tab !== 'war');
+      }
+
+      async function refresh() {
+        const res = await fetch('/api/overview');
+        state = await res.json();
+        render();
+      }
+
+      function esc(s){return String(s||'').replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]))}
+
+      function render() {
+        const sel = document.getElementById('agentId');
+        sel.innerHTML = state.agents.map(a => `<option value="${a.id}">${a.id} (${a.model})</option>`).join('');
+
+        document.getElementById('agents').innerHTML = state.agents.map(a => {
+          const active = (state.sessionsByAgent[a.id] || []).length;
+          return `<li><strong>${esc(a.id)}</strong><br/><small>${esc(a.model || '')}</small><br/><small>sessions: ${active}</small></li>`;
+        }).join('');
+
+        ['queued','in_progress','done','failed'].forEach(k => {
+          document.getElementById(k).innerHTML = state.tasks
+            .filter(t => t.status === k)
+            .map(t => `<div class="task">
+              <strong>${esc(t.title)}</strong><br/>
+              <small>${esc(t.agentId)}</small><br/>
+              ${k === 'queued' ? `<button onclick="dispatchTask('${t.id}')">Dispatch</button>` : ''}
+            </div>`).join('');
+        });
+
+        document.getElementById('messages').innerHTML = (state.warRoom?.messages || []).slice(-80).map(m => `
+          <div class="msg"><strong>${esc(m.author)}</strong> <small>${new Date(m.at).toLocaleTimeString()}</small><br/>${esc(m.text)}</div>
+        `).join('');
+      }
+
+      async function createTask() {
+        const title = document.getElementById('title').value.trim();
+        const agentId = document.getElementById('agentId').value;
+        const details = document.getElementById('details').value.trim();
+        if (!title) return alert('Title required');
+        await fetch('/api/tasks', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title, agentId, details })
+        });
+        document.getElementById('title').value = '';
+        document.getElementById('details').value = '';
+        refresh();
+      }
+
+      async function dispatchTask(id) {
+        await fetch(`/api/tasks/${id}/dispatch`, { method: 'POST' });
+        refresh();
+      }
+
+      async function sendWarMessage(){
+        const text = document.getElementById('warText').value.trim();
+        if(!text) return;
+        document.getElementById('warText').value = '';
+        await fetch('/api/war-room/message', {
+          method:'POST', headers:{'content-type':'application/json'},
+          body: JSON.stringify({ author: 'orchestrator', text })
+        });
+        refresh();
+      }
+
+      refresh();
+      setInterval(refresh, 5000);
+    </script>
+  </body>
+</html>
