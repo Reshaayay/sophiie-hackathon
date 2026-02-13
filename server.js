@@ -120,13 +120,27 @@ async function appendSheetRow(sheetName, values) {
   const keyPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH
     ? path.join(ROOT, process.env.GOOGLE_SERVICE_ACCOUNT_PATH)
     : null;
-  if (!spreadsheetId || !keyPath || !fs.existsSync(keyPath)) return { ok: false, reason: "missing_config" };
+  const keyJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+
+  if (!spreadsheetId) return { ok: false, reason: "missing_spreadsheet" };
 
   try {
-    const auth = new google.auth.GoogleAuth({
-      keyFile: keyPath,
-      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-    });
+    let auth;
+    if (keyJson) {
+      const credentials = JSON.parse(keyJson);
+      auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+      });
+    } else if (keyPath && fs.existsSync(keyPath)) {
+      auth = new google.auth.GoogleAuth({
+        keyFile: keyPath,
+        scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+      });
+    } else {
+      return { ok: false, reason: "missing_google_credentials" };
+    }
+
     const sheets = google.sheets({ version: "v4", auth });
     await sheets.spreadsheets.values.append({
       spreadsheetId,
@@ -290,7 +304,7 @@ app.get('/api/integrations/status', async (_req, res) => {
   const googleKeyPath = process.env.GOOGLE_SERVICE_ACCOUNT_PATH
     ? path.join(ROOT, process.env.GOOGLE_SERVICE_ACCOUNT_PATH)
     : null;
-  const googleReady = !!(googleKeyPath && fs.existsSync(googleKeyPath));
+  const googleReady = !!((googleKeyPath && fs.existsSync(googleKeyPath)) || process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
 
   let supabaseOk = false;
   if (supabase) {
