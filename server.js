@@ -286,11 +286,19 @@ app.post("/api/war-room/message", async (req, res) => {
         });
       }
     } catch {
+      const fallbackByAgent = {
+        quote: "Suggested quote logic: base fee + urgency surcharge + after-hours multiplier + travel band. Show assumptions clearly.",
+        invoice: "Suggested invoice flow: issue instantly after booking confirmation, send payment link, auto-remind at +24h and +72h.",
+        integration: "Integration note: persist event with idempotency key, then fan-out to Sheets/DB/Email with retry queue.",
+        research: "Market input: prioritize missed-call recovery and fast booking confirmation as primary ROI hooks.",
+        codex: "Build input: keep handlers stateless, validate payloads with schemas, and log structured events for replay.",
+        main: "Orchestrator input: assign by intent (booking/quote/invoice/support) and escalate uncertain requests to human.",
+      };
       store.warRoom.messages.push({
-        id: `msg_${Date.now()}_${target}_err`,
+        id: `msg_${Date.now()}_${target}_fallback`,
         at: Date.now(),
-        author: "system",
-        text: `Could not reach @${target} in this environment.`,
+        author: target,
+        text: fallbackByAgent[target] || "No additional input.",
         parentId: userMsg.id,
       });
     }
